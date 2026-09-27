@@ -1,0 +1,13 @@
+{
+  "name": "omnifield",
+  "description": "Инструменты работы над нашими репозиториями. Пока один: харнесс роль-модели.",
+  "owner": { "name": "omnifield" },
+  "plugins": [
+    {
+      "name": "harness",
+      "source": "./",
+      "description": "Роли, гейт границ зон, гейт git-записи и опознание сессии. Зоны объявляет сам репозиторий — .claude/harness.yaml.",
+      "category": "workflow"
+    }
+  ]
+}
