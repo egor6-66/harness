@@ -39,6 +39,7 @@
 | `hooks/harness-doctor.mjs` | проверка установки: включён ли плагин, разложены ли роли, есть ли pre-commit |
 | `hooks/statusline.mjs` | строка состояния с ролью — включается в личных настройках, см. ниже |
 | `scripts/generate-roles.mjs` | собирает файлы ролей из `harness.yaml` |
+| `skills/` | пять действий захода: `/harness:shift`, `task`, `report`, `verdict`, `checkpoint` — все пишут в `ROADMAP.yaml` скоупа |
 
 <h2 id="подключить">🔌 Как подключить</h2>
 

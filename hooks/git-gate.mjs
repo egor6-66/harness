@@ -754,12 +754,27 @@ export function currentAccess(input, config) {
 }
 
 function main() {
-  let input;
+  // Вход ПУСТОЙ и вход ОБРЕЗАННЫЙ — разные случаи, и раньше оба вели к allow. Обрезанный это
+  // текст, который начали писать и не дописали: разбор в FAQ.md.
+  let raw;
   try {
     // strip BOM: Windows-пайпы (PowerShell) могут префиксовать stdin — не повод для fail-open.
-    input = JSON.parse(readFileSync(0, "utf8").replace(/^﻿/, ""));
+    raw = readFileSync(0, "utf8").replace(/^﻿/, "").trim();
   } catch {
     return allow();
+  }
+  if (!raw) return allow();
+
+  let input;
+  try {
+    input = JSON.parse(raw);
+  } catch {
+    return deny(
+      "❌ Гейт не разобрал вход и поэтому НЕ пропускает команду.\n\n" +
+        "Пришёл неполный или испорченный JSON — какая это была команда, неизвестно, а значит " +
+        "неизвестно и то, можно ли её твоей роли.\n\n" +
+        "Действие: повтори вызов. Повторяется — это дефект роль-модели, назови его вслух.",
+    );
   }
   // Оба shell-тула харнесса (дыра PowerShell-пути найдена 2026-07-09).
   if (input.tool_name !== "Bash" && input.tool_name !== "PowerShell") return allow();

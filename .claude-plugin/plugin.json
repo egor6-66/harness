@@ -1,7 +1,7 @@
 {
   "name": "harness",
   "displayName": "Harness",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Роль-модель работы над репозиторием: роли, гейт границ зон, гейт git-записи и опознание сессии. Зоны и пины моделей репозиторий объявляет сам — .claude/harness.yaml рядом со своим кодом.",
   "author": { "name": "omnifield" },
   "keywords": ["harness", "roles", "zones", "git-gate"]

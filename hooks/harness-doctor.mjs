@@ -135,7 +135,32 @@ export function registrationReport(cwd, _moduleUrl, { ok, bad, warn }) {
   }
 
   lines.push(...rolesReport(cwd, { ok, bad, warn }));
+  lines.push(...statusLineNote({ ok, warn }));
   return lines;
+}
+
+/**
+ * Строка состояния — ЛИЧНАЯ настройка: плагин её задать не может, а репозиторий задавать не
+ * должен (путь до установленного плагина у каждого свой). Поэтому здесь не проверка, а напоминание
+ * тому, у кого роль на экране не видна.
+ */
+export function statusLineNote({ ok, warn }) {
+  // Каталог настроек переносим: он не всегда `~/.claude` — переменная главнее домашней папки.
+  const configDir = process.env.CLAUDE_CONFIG_DIR || join(process.env.HOME ?? "~", ".claude");
+  const userSettings = join(configDir, "settings.json");
+  let declared = false;
+  try {
+    declared = Boolean(JSON.parse(readFileSync(userSettings, "utf8"))?.statusLine?.command);
+  } catch {
+    declared = false;
+  }
+  if (declared) return [ok("строка состояния объявлена в личных настройках")];
+  return [
+    warn("строка состояния не объявлена — роль сессии не видна на экране постоянно"),
+    "    Ничего не ломает, но при нескольких открытых сессиях роль отличают по памяти.",
+    `    Включается в СВОИХ настройках (${userSettings}): "statusLine" с командой`,
+    "    `node <путь до установленного плагина>/hooks/statusline.mjs`.",
+  ];
 }
 
 /** Отчёт по файлам ролей: есть ли на каждую зону, и совпадает ли объявленная в нём роль. */
