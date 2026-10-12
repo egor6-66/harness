@@ -7,10 +7,12 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const { loadConfig, zonePaths } = await import(join(here, "..", "hooks", "harness-config.mjs"));
+const { loadConfig, zonePaths } = await import(
+  pathToFileURL(join(here, "..", "hooks", "harness-config.mjs")).href
+);
 
 const repo = resolve(process.argv[2] ?? process.cwd());
 const config = loadConfig(repo);
@@ -25,7 +27,12 @@ if (zones.length === 0) {
 // вместе с `--settings`, а забыть флаг легко — тогда git остался бы без границы вовсе. Git держит
 // гейт, он включён всегда и роль читает из `HARNESS_SCOPE` ниже. Одна механика на предмет:
 // файлы — правила, git — гейт.
-const editRule = (path) => `Edit(${path}/**)`;
+//
+// Формы разные намеренно. Запрет с одним сегментом (`Edit(solid/**)`) Claude Code читает как «папка
+// solid на любой глубине» и режет вложенную `settings/src/solid/` собственной зоны, а запрет сильнее
+// разрешения. Многосегментный `/**/*` привязан к корню; разрешения и так считаются от корня.
+const allowRule = (path) => `Edit(${path}/**)`;
+const denyRule = (path) => `Edit(${path}/**/*)`;
 
 function ownerSettings(zone) {
   const mine = zonePaths(config.zones[zone]);
@@ -40,8 +47,8 @@ function ownerSettings(zone) {
       `node <плагин>/scripts/generate-roles.mjs`,
     env: { HARNESS_SCOPE: zone },
     permissions: {
-      allow: mine.map(editRule),
-      deny: others.map(editRule),
+      allow: mine.map(allowRule),
+      deny: others.map(denyRule),
     },
   };
 }
