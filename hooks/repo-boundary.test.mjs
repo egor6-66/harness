@@ -107,3 +107,21 @@ test("git-gate: запись в соседний репозиторий — deny
   );
   assert.equal(decision, "deny");
 });
+
+test("баннер роли называет границу репозитория", () => {
+  const { app } = scope();
+  for (const role of ["main", "ui"]) {
+    writeFileSync(
+      join(app, ".claude", "harness.yaml"),
+      "apiVersion: harness/v1\nproduct: app\nzones:\n  ui:\n    paths: [ui]\n",
+    );
+    const out = execFileSync(process.execPath, [join(hooks, "scope-identity.mjs")], {
+      cwd: app,
+      input: "{}",
+      env: { ...process.env, HARNESS_SCOPE: role, CLAUDE_PROJECT_DIR: app },
+    }).toString();
+    const banner = JSON.parse(out).hookSpecificOutput.additionalContext;
+    assert.match(banner, /Граница репозитория/, role);
+    assert.ok(banner.includes(app), role);
+  }
+});
