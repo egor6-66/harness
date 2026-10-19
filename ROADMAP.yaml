@@ -98,3 +98,39 @@ categories:
           свой. Значит это личная настройка — и доктор теперь не требует её, а напоминает тому, у
           кого роль на экране не видна, с точным путём до его файла настроек (каталог берётся из
           переменной, а не из домашней папки — он переносим).
+
+  - category: Граница репозитория
+    items:
+      - id: repo-boundary
+        type: feature
+        status: Done
+        priority: High
+        name: "Правка и git-запись вне репозитория сессии запрещены любой роли"
+        description: |
+          Сделано 2026-10-19. Найдено в скоупе из нескольких репозиториев: сессия architect
+          приложения `ewc` могла править прилинкованную базу `web-core` — ни правила роли, ни гейт
+          границы между репозиториями не держали, отказ был только решением самой сессии.
+
+          Хук `repo-boundary.mjs` на Edit/MultiEdit/Write/NotebookEdit: цель вне корня репозитория
+          (по настоящему пути, линк тоже) — отказ; наружу можно только в служебные папки Claude
+          Code и во временную. `git-gate` раньше прав роли режет git-запись в чужой репозиторий:
+          `cd`, `-C`, `--git-dir`/`--work-tree`, `bash -c`. Чтение соседа не тронуто.
+
+          Проверено: тесты `hooks/repo-boundary.test.mjs`; живьём на скоупе — правка
+          `web-core/ui/package.json` и `ewc/node_modules/@web-core/ui/package.json` из сессии `ewc`
+          отбиты, свой файл и память сессии проходят; `cd ../web-core && git commit` и
+          `git -C …/web-core push` отбиты, `git log` там же проходит.
+
+      - id: bash-write-sandbox
+        type: feature
+        status: Open
+        priority: High
+        name: "Запись в соседа не-git командой Bash — песочница Claude Code"
+        description: |
+          Открыто 2026-10-19. `sed -i ../сосед/…` хуком честно не закрыть. Закрывает песочница
+          (`sandbox.enabled`, `failIfUnavailable`, `allowUnsandboxedCommands: false` в файле роли),
+          но в контейнере скоупа она не стартует: `bwrap: No permissions to create a new namespace`
+          — нет непривилегированных user namespaces. Включить её в ролях сейчас значит отключить
+          Bash целиком. Нужно решение user: разрешить user namespaces контейнеру (настройки образа
+          или запуска) и потом вписать песочницу в `generate-roles.mjs`, либо принять дыру.
+

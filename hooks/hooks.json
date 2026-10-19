@@ -9,6 +9,15 @@
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/git-gate.mjs\""
           }
         ]
+      },
+      {
+        "matcher": "Edit|MultiEdit|Write|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/repo-boundary.mjs\""
+          }
+        ]
       }
     ],
     "SessionStart": [

@@ -33,8 +33,8 @@
 //     → commit-only (gated), НЕ full.
 
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { argv } from "node:process";
 import { fileURLToPath } from "node:url";
 import { outsideOwnership, ownedRoots, resolveTarget } from "./ownership.mjs";
@@ -403,6 +403,133 @@ export function blockReason(cmd, access) {
     if (label) return label;
   }
   return null;
+}
+
+// --- ГРАНИЦА РЕПОЗИТОРИЯ: git-запись в ЧУЖОЙ репозиторий ---------------------
+// Права роли (`config.git`) — это права на `.git` СВОЕГО репозитория. Соседний репозиторий
+// рядом — другой продукт со своими ролями, и наших прав на него нет ни у одной роли, architect
+// не исключение: `cd ../сосед && git commit` или `git -C ../сосед push` раньше проходили по
+// правам текущего. Поэтому направление вызова считается до прав: запись туда — отказ без вопроса.
+
+/** Глаголы, которые только читают: в чужом репозитории разрешены они одни. */
+const READ_ONLY_VERBS = new Set([
+  "",
+  "status",
+  "log",
+  "diff",
+  "show",
+  "blame",
+  "grep",
+  "ls-files",
+  "ls-tree",
+  "ls-remote",
+  "rev-parse",
+  "rev-list",
+  "describe",
+  "cat-file",
+  "shortlog",
+  "show-ref",
+  "for-each-ref",
+  "name-rev",
+  "merge-base",
+  "whatchanged",
+  "version",
+  "help",
+]);
+
+const CD_WORDS = new Set(["cd", "pushd"]);
+const SHELLS = new Set(["bash", "sh", "zsh", "dash", "ksh"]);
+
+/** Каталог, в котором исполнится git: cwd сегмента плюс `-C`, `--git-dir`, `--work-tree`. */
+function invocationDir(tokens, start, cwd) {
+  let dir = cwd;
+  for (let i = start + 1; i < tokens.length && tokens[i].startsWith("-"); i++) {
+    const token = tokens[i];
+    const [name, inline] = token.includes("=") ? token.split(/=(.*)/s) : [token, undefined];
+    if (!GIT_OPTS_WITH_VALUE.has(name)) continue;
+    const value = inline ?? tokens[i + 1];
+    if (inline === undefined) i += 1;
+    if (value === undefined) break;
+    if (name === "-C" || name === "--work-tree") dir = resolve(dir, value);
+    else if (name === "--git-dir") dir = dirname(resolve(dir, value));
+  }
+  return dir;
+}
+
+/** Корень git-репозитория каталога (настоящий путь), либо null — каталога нет или это не git. */
+function toplevelOf(dir) {
+  const out = gitOut(dir, ["rev-parse", "--show-toplevel"]);
+  if (out === null) return null;
+  try {
+    return realpathSync(out);
+  } catch {
+    return out;
+  }
+}
+
+/**
+ * Вызовы git-записи с каталогом исполнения: `[{ verb, dir }]`. Сегменты идут по порядку, и `cd`
+ * двигает каталог для следующих — так `cd ../сосед && git commit` виден как коммит в соседа.
+ * `bash -c '<скрипт>'` разбирается тем же способом изнутри; прочие обёртки — грубой сетью с
+ * текущим каталогом.
+ */
+export function gitWrites(cmd, cwd, depth = 0) {
+  const segments = [];
+  if (depth > 3 || !collectSegments(stripHeredocBodies(cmd), segments)) {
+    return scanAll(tokenize(cmd))
+      .filter(({ tool, verb }) => tool === "git" && !READ_ONLY_VERBS.has(verb))
+      .map(({ verb }) => ({ verb, dir: cwd }));
+  }
+  const found = [];
+  let dir = cwd;
+  for (const segment of segments) {
+    const tokens = tokenize(segment);
+    const word = commandWord(segment);
+    const at = tokens.findIndex((t) => baseName(t) === word);
+    if (CD_WORDS.has(word)) {
+      const to = tokens[at + 1];
+      if (to && to !== "-") dir = resolve(dir, to.replace(/^~(?=\/|$)/, process.env.HOME ?? "~"));
+    } else if (word === "git") {
+      const { verb } = readInvocation(tokens, at);
+      if (!READ_ONLY_VERBS.has(verb)) found.push({ verb, dir: invocationDir(tokens, at, dir) });
+    } else if (SHELLS.has(word) && tokens.includes("-c")) {
+      const script = tokens[tokens.indexOf("-c") + 1];
+      if (script) found.push(...gitWrites(script, dir, depth + 1));
+    } else if (WRAPPER_WORDS.has(word)) {
+      const flat = tokens.flatMap((t) => t.split(/\s+/)).filter(Boolean);
+      flat.forEach((t, i) => {
+        if (baseName(t) !== "git") return;
+        const { verb } = readInvocation(flat, i);
+        if (!READ_ONLY_VERBS.has(verb)) found.push({ verb, dir: invocationDir(flat, i, dir) });
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * Первая git-запись в репозиторий, отличный от `repoRoot`: `{ verb, target }`, либо null.
+ * Каталог, который git не опознал (нет такого, не репозиторий), не выдумывается — пропуск.
+ */
+export function foreignRepoWrite({ cmd, cwd, repoRoot }) {
+  const own = toplevelOf(repoRoot);
+  if (own === null) return null;
+  for (const { verb, dir } of gitWrites(cmd, cwd)) {
+    const top = toplevelOf(dir);
+    if (top !== null && top !== own) return { verb, target: top };
+  }
+  return null;
+}
+
+function buildForeignMessage(cmd, write, own) {
+  return [
+    `❌ Команда \`${cmd}\` заблокирована harness-хуком (git-gate, граница репозитория).`,
+    ``,
+    `Причина: \`git ${write.verb}\` пишет в чужой репозиторий \`${write.target}\`;`,
+    `сессия запущена для \`${own}\`. Права роли — только на свой \`.git\`, у любой роли.`,
+    ``,
+    `Действие: STOP. Скажи user, что нужно сделать в том репозитории, — это работа его сессии.`,
+  ].join("\n");
 }
 
 // --- ГРАНИЦА ЗОНЫ ВНУТРИ РАЗРЕШЁННОГО КОММИТА -------------------------------
@@ -783,6 +910,15 @@ function main() {
   if (!cmd) return allow();
 
   const repoRoot = input.cwd || process.cwd();
+
+  // Граница репозитория — раньше прав роли: на чужой `.git` прав нет ни у кого. Действует там,
+  // где репозиторий объявил роль-модель; корень — репозиторий сессии, а не текущий каталог шелла.
+  const projectDir = process.env.CLAUDE_PROJECT_DIR || repoRoot;
+  if (existsSync(join(projectDir, ".claude", "harness.yaml"))) {
+    const write = foreignRepoWrite({ cmd, cwd: repoRoot, repoRoot: projectDir });
+    if (write) return deny(buildForeignMessage(cmd, write, toplevelOf(projectDir)));
+  }
+
   const config = loadConfig(repoRoot);
   const access = currentAccess(input, config);
   const reason = blockReason(cmd, access);
